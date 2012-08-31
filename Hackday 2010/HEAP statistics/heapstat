@@ -1,0 +1,45 @@
+#!/usr/bin/ksh
+#if [ ($1 = "-h") -o ($1 = "-?") -o ($# -eq 1) ]
+if [ $1 = "-h" ]
+then
+echo "USAGE: heapstat executable <options>"
+echo "<options> :\nrefresh -> commands erases the memory map
+   tree -f  -> displays the free memory details
+   tree -a  -> displays all the nodes
+   tree -h  -> displays all the holes
+   tree -m  -> displays all allocated nodes
+   tree -n <hex addr>  -> displays the details of any hex address within the process limits
+   summary  -> gives the summary of the memory(including the malloc algorithms that are used )
+   heap  -> gives the details and values of each parts of heap structure
+   path <hex addr>  -> give the path from the given node to root in a tree (options)
+   freport -limits <min> <max>  -> fragmentation summary of the nodes of the specified range
+   freport -limits <min> <max> -m  -> fragmentation details of all malloced nodes of specified range
+   freport -limits <min> <max> -f  -> fragmentation details of all free nodes of specified range
+   freport -limits <min> <max> -h  -> fragmentation details of all holes of specified range
+   freport -limits <min> <max> -a  -> fragmentation details of all nodes of specified range
+   freport -mfactor <base> <factor>  -> fragmentation summary of all the nodes in factor format (incremnetating of range done in multiplicative manner
+   freport -mfactor <base> <factor> -m -> fragmentation details of all malloced nodes in factor format
+   freport -mfactor <base> <factor> -f  -> fragmentation details of all free nodes in factor format
+   freport -mfactor <base> <factor> -h -> fragmentation details of all holes in factor format
+   freport -mfactor <base> <factor> -a -> displays details of all nodes in factor format
+   All freport commands can be done on additive increment by changing -mfactor to -afactor
+   Also maximum limit to the command can be specified by -l then value
+   Eg: freport -afactor <base> <factor> -l (value) -a -> for fragmentation details of the all nodes in factor format (incrementing of range is done additiveliy) maximum limit is value
+
+All subcommands can redirect the output to new file by appending following at end of each command:
+         -o (filename)  -> Eg: tree -f -o output -- directs the output of the command into output file"
+else
+if [ -n $PLUGIN_PATH ]
+then
+plugin_path=$PLUGIN_PATH
+plugin_path=${plugin_path}"/"libdbx_malloc.so
+else
+plugin_path="./libdbx_malloc.so"
+fi
+echo pluginload $plugin_path > /tmp/dbxin
+echo $2 "-o /tmp/ouput" >> /tmp/dbxin
+echo detach >> /tmp/dbxin
+dbx32 -c /tmp/dbxin -a $1 > /dev/null 2>&1
+cat /tmp/ouput
+rm /tmp/ouput /tmp/dbxin
+fi

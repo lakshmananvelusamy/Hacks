@@ -1,0 +1,226 @@
+#!/usr/bin/ksh
+# Move to sandbox/<gsaname> dir and then execute this command
+# You need to provide release through -r or set CMVC_RELEASE
+# To extract the files dropped into a defect 
+#	cst -d <defect_no> -r <rele>
+#   rele is 3 letter name i.e, 53N not bos53N
+# To do clean sandbox test for all the tracks opened use -a flag.
+#	cst -d <defect_no> -a
+
+
+init_extract()
+{
+	USAGE="cst -d <defect> ] [-r <release> | -a]"
+	TMPFILE1=tmp_filext_file1.out
+	TMPFILE2=tmp_filext_file2.out
+	TOP=`pwd`
+	NUMFILES=0
+	RFLAG=0
+	ALLFLAG=0
+	FFLAG=0
+}
+clean()
+{
+	cd $SBPATH
+	cd ..
+	echo y | mksb -undo ${DEFECT}_csb_$RELE > /dev/null 2>&1
+}
+
+cleanup_exit()
+{	
+	exit $1
+}
+
+extract_by_defect()
+{
+	for entry in `cat $TMPFILE1`
+	do
+		cd $SBPATH
+		rele=`echo $entry |  cut -d '|' -f 1`
+		file=`echo $entry |  cut -d '|' -f 2`
+		version=`echo $entry | cut -d '|' -f 3`
+		if [ "$RELE" ] && ! [ $RELE = $rele ]
+		then
+			continue
+		fi
+		/usr/bin/mkdir -p $file >/dev/null 2>&1
+		A=`/usr/bin/pwd`
+		cd $file
+		cd ..
+		/usr/bin/rmdir ${A}"/"$file >/dev/null 2>&1
+		File -extract $file -rele $rele -version $version
+	done	
+	chmod -R 750 * 2>/dev/null
+}
+
+get_file_list()
+{
+		Report -gen changeview -where "defectname='$DEFECT'" > $TMPFILE2
+		if ! [ -s $TMPFILE2 ]
+		then
+			echo "Could not get the defect information from CMVC"
+			cleanup_exit 1
+		fi
+		awk -F '|' '{printf("%s|%s|%s\n", $12, $13, $14)'} $TMPFILE2 > $TMPFILE1
+	NUMFILES=`wc -l $TMPFILE1 | awk '{print $1}'`
+}
+
+parse_opts()
+{
+	set -- `getopt ad:r: $*`
+	# check result of parsing
+	if [ $? != 0 ]
+	then
+	       exit 1
+	fi
+
+	while [ $1 != -- ]
+	do
+		case $1 in
+		-d)     DFLAG=1
+			DEFECT=$2
+			shift;;
+		-r)     RFLAG=1
+			RELE=bos$2
+			PC_RELE=$2
+			shift;;
+		-a)	ALLFLAG=1 ;;
+		*)	echo $USAGE
+			exit 1
+	        esac
+		shift   # next flag
+	done
+
+	if [ $ALLFLAG -eq 1 ] && [ $RFLAG -eq 1 ]
+	then
+		echo $USAGE
+		cleanup_exit 1
+	fi
+
+	if [ $RFLAG -eq 0 ] && [ $DFLAG -eq 0 ] 
+	then
+		if ! [ "$CMVC_RELEASE" ]
+		then
+			echo "Specify the release with -r flag or set CMVC_RELEASE variable"
+			exit 1
+		fi
+		RELE=$CMVC_RELEASE
+	fi
+}
+
+
+########################################################
+# MAIN PROGRAM                                         #
+########################################################
+FLAG=0
+	pwd > temp0
+	cat temp0 | awk -F"/" '{ ORS="";for(i=1;i<=NF;i++) { print $i" " }}' > temp01
+	WC=`wc -w temp01 | tr -d temp01`
+	grep "^ sandbox" temp01 > /dev/null 2>&1
+	RC=$?	
+	if [ $WC -ne 2 -a $RC -ne 0 ] 
+	then 
+	echo "NOT IN /sandbox/<gsaname> dir"
+	exit 1
+	fi
+init_extract
+
+parse_opts $*
+
+if [ $DFLAG -eq 1 -a $ALLFLAG -eq 0 ]
+then
+	mksb -back latest_$PC_RELE ${DEFECT}_csb_$RELE > /dev/null 2>&1
+	cd ${DEFECT}_csb_$RELE
+	SBPATH=`/usr/bin/pwd`
+	get_file_list
+	extract_by_defect
+	cd $SBPATH
+	find . -name *.h > temp1
+	cat temp1 | awk -F"/" '{ ORS="";for(i=1;i<NF;i++) { print $i"/" }print "\n"}' > temp2
+	for i in $(cat temp2); do
+		cd $i
+		build -sb ${DEFECT}_csb_$RELE > /dev/null 2>&1
+		if [ $? != 0 ] 
+		then
+			echo "########################################"
+			echo "#     CLEAN SANDBOX TEST : FAILED      #"
+			echo "########################################"
+			clean
+			cleanup_exit 1
+		fi
+	done
+	cd $SBPATH
+	find . -name *.c > temp1
+	cat temp1 | awk -F"/" '{ ORS="";for(i=1;i<NF;i++) { print $i"/" }print "\n"}' > temp2
+	for i in $(cat temp2); do
+		cd $i
+		build -sb ${DEFECT}_csb_$RELE > /dev/null 2>&1
+		if [ $? != 0 ] 
+		then
+			echo "########################################"
+			echo "#     CLEAN SANDBOX TEST : FAILED      #"
+			echo "########################################"
+			clean 
+			cleanup_exit 1
+		fi
+	done
+	echo "########################################"
+	echo "#     CLEAN SANDBOX TEST : PASSED      #"
+	echo "########################################"
+	clean
+	cleanup_exit 0
+fi
+if [ $DFLAG -eq 1 -a $ALLFLAG -eq 1 ]
+then
+	get_file_list
+	for entry in `cat $TMPFILE1`
+	do
+		echo $entry |  cut -d '|' -f 1 > temp4
+	done
+	uniq temp4 > temp5
+	for jj in $(cat temp5); do
+		RELE=$jj
+		PC_RELE=`echo $RELE | cut -c 4,5,6`
+	mksb -back latest_$PC_RELE ${DEFECT}_csb_$RELE > /dev/null 2>&1
+	cd ${DEFECT}_csb_$RELE
+	SBPATH=`/usr/bin/pwd`
+	get_file_list
+	extract_by_defect
+	cd $SBPATH
+	find . -name *.h > temp1
+	cat temp1 | awk -F"/" '{ ORS="";for(i=1;i<NF;i++) { print $i"/" }print "\n"}' > temp2
+	for i in $(cat temp2); do
+		cd $i
+		build -sb ${DEFECT}_csb_$RELE > /dev/null 2>&1
+		if [ $? != 0 ] 
+		then
+			clean
+			cleanup_exit 1
+		fi
+	done
+	cd $SBPATH
+	find . -name *.c > temp1
+	cat temp1 | awk -F"/" '{ ORS="";for(i=1;i<NF;i++) { print $i"/" }print "\n"}' > temp2
+	for i in $(cat temp2); do
+		cd $i
+		build -sb ${DEFECT}_csb_$RELE > /dev/null 2>&1
+		if [ $? != 0 ] 
+		then
+			echo "########################################"
+			echo "#     CLEAN SANDBOX TEST : FAILED      #"
+			echo "#     RELE = bos$RELE                  #"
+			echo "########################################"
+			FLAG=1
+		clean
+		fi
+	done
+done
+clean
+fi
+if [ $FLAG -eq 0 ]
+then
+	echo "#########################################################"
+	echo "#     CLEAN SANDBOX TEST : PASSED FOR ALL RELEASES      #"
+	echo "#########################################################"
+fi
+cleanup_exit 0
